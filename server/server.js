@@ -60,6 +60,95 @@ app.post('/api/login', async (req, res) => {
       console.error(err.message);
       res.status(500).send('Server error');
     }
+});
+
+// Получение списка задач
+app.get('/api/tasks', async (req, res) => {
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (!token) {
+      return res.status(403).send('Token is missing');
+    }
+  
+    try {
+      const decoded = jwt.verify(token, 'secret_key');
+      const tasks = await pool.query(
+        'SELECT id, name, completed, to_char(end_date, \'DD-MM-YYYY\') AS end_date FROM tasks WHERE user_id = $1',
+        [decoded.id]
+      );
+      res.json(tasks.rows);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server error');
+    }
+  });
+  
+  // Добавление новой задачи
+  app.post('/api/tasks', async (req, res) => {
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (!token) {
+      return res.status(403).send('Token is missing');
+    }
+  
+    try {
+      const decoded = jwt.verify(token, 'secret_key');
+      const { name, endDate} = req.body;
+  
+      const newTask = await pool.query(
+        'INSERT INTO tasks (name, completed, user_id, end_date) VALUES ($1, $2, $3, $4) RETURNING *',
+        [name, false, decoded.id, endDate]
+      );
+      console.log(endDate);
+      res.json(newTask.rows[0]);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server error');
+    }
+  });
+  
+  // Удаление задачи
+  app.delete('/api/tasks/:id', async (req, res) => {
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (!token) {
+      return res.status(403).send('Token is missing');
+    }
+  
+    try {
+      const decoded = jwt.verify(token, 'secret_key');
+      const taskId = req.params.id;
+  
+      // Удаляем задачу только если она принадлежит текущему пользователю
+      await pool.query('DELETE FROM tasks WHERE id = $1 AND user_id = $2', [taskId, decoded.id]);
+  
+      res.status(204).send(); // Успешно, но ничего не возвращаем
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server error');
+    }
+  });
+  
+  // Изменение статуса задачи
+  app.put('/api/tasks/:id', async (req, res) => {
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (!token) {
+      return res.status(403).send('Token is missing');
+    }
+  
+    try {
+      const decoded = jwt.verify(token, 'secret_key');
+      const taskId = req.params.id;
+      const { completed } = req.body;
+  
+      // Обновляем задачу только если она принадлежит текущему пользователю
+      const updatedTask = await pool.query(
+        'UPDATE tasks SET completed = $1 WHERE id = $2 AND user_id = $3 RETURNING *',
+        [completed, taskId, decoded.id]
+      );
+  
+      res.json(updatedTask.rows[0]);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server error');
+    }
   });
 
 // Запуск сервера
