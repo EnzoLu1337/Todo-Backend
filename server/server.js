@@ -103,6 +103,38 @@ app.delete('/api/deleteacc', async(req, res) => {
   }
 });
 
+//Изменение пароля
+app.put('/api/editpasswd', async (req, res) => {
+  const { oldPasswd, newPasswd } = req.body;
+  const token = req.headers['authorization']?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(403).send('Token is missing');
+  }
+
+  try {   
+    const decoded = jwt.verify(token, 'secret_key');
+
+    const user = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.id]);
+    if (user.rows.length === 0) {
+      return res.status(404).send('User not found');
+    }
+
+    const validPassword = await bcrypt.compare(oldPasswd, user.rows[0].password);
+    if (!validPassword) {
+      return res.status(401).send('Invalid credentials');
+    }
+    
+    const hashedNewPassword = await bcrypt.hash(newPasswd, 10);
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedNewPassword, decoded.id]);
+
+    res.status(204).send('Password updated');
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
 // Получение списка задач
 app.get('/api/tasks', async (req, res) => {
   const token = req.headers['authorization']?.split(' ')[1];
