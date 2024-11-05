@@ -78,6 +78,31 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+//Удаление аккаунта пользователя
+app.delete('/api/deleteacc', async(req, res) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) {
+    return res.status(403).send('Token is missing');
+  }
+  try {
+    const decoded = jwt.verify(token, 'secret_key');
+    
+    const user = await pool.query('SELECT * FROM users WHERE id = $1', [decoded]);
+    if (user.rows.length === 0) {
+      return res.status(404).send('User not found');
+    }
+
+    await pool.query('DELETE FROM tasks WHERE user_id = $1', [decoded.id])
+    await pool.query('DELETE FROM users WHERE id = $1', [decoded.id]);
+    
+    res.status(204).send('User and associated tasks deleted');
+  }
+  catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
 // Получение списка задач
 app.get('/api/tasks', async (req, res) => {
   const token = req.headers['authorization']?.split(' ')[1];
