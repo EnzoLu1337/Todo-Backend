@@ -2,7 +2,6 @@ const request = require('supertest');
 const app = require('../server/server');
 const pool = require('../server/db')
 
-
 describe('API Tests', () => {
   // Тест регистрации пользователя
   it('POST /api/register - должно регистрировать пользователя', async () => {
@@ -80,5 +79,52 @@ describe('API Tests', () => {
 
     expect(deleteResponse.status).toBe(204);
   });
-});
 
+  // Тест на изменение пароля
+  it('PUT /api/editpasswd - должно изменять пароль пользователя', async () => {
+    const loginResponse = await request(app).post('/api/login').send({
+      username: 'testuser',
+      password: 'testpassword',
+    });
+
+    const token = loginResponse.body.token;
+    const response = await request(app)
+      .put('/api/editpasswd')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ oldPasswd: 'testpassword', newPasswd: 'newtestpassword' });
+
+    expect(response.status).toBe(204);
+
+    // Проверка нового пароля
+    const reloginResponse = await request(app).post('/api/login').send({
+      username: 'testuser',
+      password: 'newtestpassword',
+    });
+    expect(reloginResponse.status).toBe(200);
+    expect(reloginResponse.body).toHaveProperty('token');
+  });
+
+  // Тест на удаление аккаунта
+  it('DELETE /api/deleteacc - должно удалять аккаунт пользователя', async () => {
+    const loginResponse = await request(app).post('/api/login').send({
+      username: 'testuser',
+      password: 'newtestpassword',
+    });
+
+    const token = loginResponse.body.token;
+    const response = await request(app)
+      .delete('/api/deleteacc')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(204);
+
+    // Проверка отсутствия пользователя
+    const reloginResponse = await request(app).post('/api/login').send({
+      username: 'testuser',
+      password: 'newtestpassword',
+    });
+    expect(reloginResponse.status).toBe(401);
+    expect(reloginResponse.text).toBe('User not found');
+  });
+
+});
