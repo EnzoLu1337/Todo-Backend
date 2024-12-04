@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const pool = require('./database');
 const logger = require('./logger');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 app.use(bodyParser.json());
@@ -21,6 +22,15 @@ app.use(cors({
     }
   }
 }));
+
+// Лимитер для защиты от брутфорса
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 минут
+  max: 5,
+  message: 'Too many login attempts from this IP, please try again later.',
+  standardHeaders: true, // Отправляет информацию о лимите в заголовках `RateLimit-*`
+  legacyHeaders: false, // Отключает старые заголовки `X-RateLimit-*`
+});
 
 // Регистрация пользователя
 app.post('/api/register', async (req, res) => {
@@ -45,7 +55,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // Авторизация пользователя
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
 
   try {
