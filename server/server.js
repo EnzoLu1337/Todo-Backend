@@ -4,10 +4,11 @@ const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const pool = require('./database');
-
+const logger = require('./logger');
 
 const app = express();
 app.use(bodyParser.json());
+
 const allowedOrigins = ['http://127.0.0.1:3000'];
 
 app.use(cors({
@@ -15,43 +16,33 @@ app.use(cors({
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
+      logger.warn(`Blocked CORS request from origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   }
 }));
-
-
 
 // Регистрация пользователя
 app.post('/api/register', async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    // Проверка на существующего пользователя
-    const userExists = await pool.query(
-      'SELECT * FROM users WHERE username = $1',
-      [username]
-    );
-
+    const userExists = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
     if (userExists.rows.length > 0) {
+      logger.info(`Registration failed: User ${username} already exists`);
       return res.status(400).send('User already exists');
     }
 
-    // Хеширование пароля
     const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query('INSERT INTO users (username, password) VALUES ($1, $2)', [username, hashedPassword]);
 
-    // Сохранение нового пользователя в базе данных
-    const newUser = await pool.query(
-      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING *',
-      [username, hashedPassword]
-    );
+    logger.info(`User ${username} successfully registered`);
     res.status(201).send('User registered');
   } catch (err) {
-    console.error(err.message);
-    res.status(400).send('Error registering user');
+    logger.error(`Error during registration: ${err.message}`, { stack: err.stack });
+    res.status(500).send('Error registering user');
   }
 });
-
 
 // Авторизация пользователя
 app.post('/api/login', async (req, res) => {
@@ -59,46 +50,50 @@ app.post('/api/login', async (req, res) => {
 
   try {
     const user = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-
     if (user.rows.length === 0) {
+      logger.warn(`Login failed: User ${username} not found`);
       return res.status(401).send('User not found');
     }
 
     const validPassword = await bcrypt.compare(password, user.rows[0].password);
-
     if (!validPassword) {
+      logger.warn(`Login failed: Invalid password for user ${username}`);
       return res.status(401).send('Invalid credentials');
     }
 
     const token = jwt.sign({ id: user.rows[0].id }, 'secret_key', { expiresIn: '1h' });
+    logger.info(`User ${username} logged in successfully`);
     res.json({ token });
   } catch (err) {
-    console.error(err.message);
+    logger.error(`Error during login: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
 
-//Удаление аккаунта пользователя
-app.delete('/api/deleteacc', async(req, res) => {
+// Удаление аккаунта пользователя
+app.delete('/api/deleteacc', async (req, res) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) {
+    logger.warn('Delete account failed: Missing token');
     return res.status(403).send('Token is missing');
   }
+
   try {
     const decoded = jwt.verify(token, 'secret_key');
-    
-    const user = await pool.query('SELECT * FROM users WHERE id = $1', [decoded]);
+    const user = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.id]);
+
     if (user.rows.length === 0) {
+      logger.warn(`Delete account failed: User with ID ${decoded.id} not found`);
       return res.status(404).send('User not found');
     }
 
-    await pool.query('DELETE FROM tasks WHERE user_id = $1', [decoded.id])
+    await pool.query('DELETE FROM tasks WHERE user_id = $1', [decoded.id]);
     await pool.query('DELETE FROM users WHERE id = $1', [decoded.id]);
-    
+
+    logger.info(`User with ID ${decoded.id} and associated tasks deleted`);
     res.status(204).send('User and associated tasks deleted');
-  }
-  catch (err) {
-    console.error(err.message);
+  } catch (err) {
+    logger.error(`Error during account deletion: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
@@ -128,9 +123,10 @@ app.put('/api/editpasswd', async (req, res) => {
     const hashedNewPassword = await bcrypt.hash(newPasswd, 10);
     await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedNewPassword, decoded.id]);
 
+    logger.info(`User with ID ${decoded.id} changed passwd`);
     res.status(204).send('Password updated');
   } catch (err) {
-    console.error(err.message);
+    logger.error(`Error edit passwd: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
@@ -148,9 +144,10 @@ app.get('/api/tasks', async (req, res) => {
       'SELECT id, name, completed, to_char(end_date, \'DD-MM-YYYY\') AS end_date FROM tasks WHERE user_id = $1',
       [decoded.id]
     );
+    logger.info(`User with ID ${decoded.id} get tasks`);
     res.json(tasks.rows);
   } catch (err) {
-    console.error(err.message);
+    logger.error(`Error get tasks: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
@@ -171,9 +168,10 @@ app.post('/api/tasks', async (req, res) => {
       [name, false, decoded.id, endDate]
     );
     console.log(endDate);
+    logger.info(`User with ID ${decoded.id} add task`);
     res.json(newTask.rows[0]);
   } catch (err) {
-    console.error(err.message);
+    logger.error(`Error add task: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
@@ -192,9 +190,11 @@ app.delete('/api/tasks/:id', async (req, res) => {
     // Удаляем задачу только если она принадлежит текущему пользователю
     await pool.query('DELETE FROM tasks WHERE id = $1 AND user_id = $2', [taskId, decoded.id]);
 
+    logger.info(`User with ID ${decoded.id} delete task with id ${taskId}`);
     res.status(204).send(); // Успешно, но ничего не возвращаем
   } catch (err) {
     console.error(err.message);
+    logger.error(`Error delete task with id ${taskId}: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
@@ -217,9 +217,11 @@ app.put('/api/tasks/:id', async (req, res) => {
       [completed, taskId, decoded.id]
     );
 
+    logger.info(`User with ID ${decoded.id} update task with id ${taskId}`);
     res.json(updatedTask.rows[0]);
   } catch (err) {
     console.error(err.message);
+    logger.error(`Error update task with id ${taskId}: ${err.message}`, { stack: err.stack });
     res.status(500).send('Server error');
   }
 });
